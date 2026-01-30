@@ -168,14 +168,17 @@ type ObjectValue = PrimitiveValue | NrbfRecord;
  */
 class ClassRecord extends NrbfRecord {
   public memberValues: Map<string, ObjectValue> = new Map();
+  public metadataId?: number; // to track ClassWithId references
 
   constructor(
     public classInfo: ClassInfo,
     public memberTypeInfo: MemberTypeInfo | null,
     public libraryId: number | null,
-    public recordTypeValue: RecordType
+    public recordTypeValue: RecordType,
+    metadataId?: number
   ) {
     super();
+    this.metadataId = metadataId;
   }
 
   get recordType() { return this.recordTypeValue; }
@@ -1024,32 +1027,41 @@ export class NrbfDecoder {
     const objectId = this.reader.readInt32();
     const metadataId = this.reader.readInt32();
     
+    this.log(`      objectId=${objectId}, metadataId=${metadataId}`);
+    
     const metadata = this.metadataMap.get(metadataId);
     if (!metadata) {
-      throw new Error(`Metadata not found for ID ${metadataId}`);
+        throw new Error(`Metadata not found for ID ${metadataId}`);
     }
     
     const classInfo: ClassInfo = {
-      objectId,
-      name: metadata.classInfo.name,
-      memberCount: metadata.classInfo.memberCount,
-      memberNames: metadata.classInfo.memberNames
+        objectId,
+        name: metadata.classInfo.name,
+        memberCount: metadata.classInfo.memberCount,
+        memberNames: metadata.classInfo.memberNames
     };
     
-    const record = new ClassRecord(classInfo, metadata.memberTypeInfo, metadata.libraryId, RecordType.ClassWithId);
+    const record = new ClassRecord(
+        classInfo, 
+        metadata.memberTypeInfo, 
+        metadata.libraryId, 
+        RecordType.ClassWithId,
+        metadataId // Pass the metadata ID
+    );
+    
     this.recordMap.set(objectId, record);
     
     if (metadata.memberTypeInfo) {
-      this.readMemberValues(record, classInfo.memberNames, metadata.memberTypeInfo);
+        this.readMemberValues(record, classInfo.memberNames, metadata.memberTypeInfo);
     } else {
-      for (const memberName of classInfo.memberNames) {
+        for (const memberName of classInfo.memberNames) {
         const value = this.decodeNext();
         record.memberValues.set(memberName, value);
-      }
+        }
     }
     
     return record;
-  }
+    }
 
   private readMemberValues(record: ClassRecord, memberNames: string[], memberTypeInfo: MemberTypeInfo): void {
     for (let i = 0; i < memberNames.length; i++) {
@@ -1328,27 +1340,92 @@ export class NrbfDecoder {
 /**
  * NRBF Encoder
  */
+// nrbf.ts - Fix the encoder to handle primitive values in ClassRecords
+
+// nrbf.ts - Simplified encoder without classMetadataMap
+
 export class NrbfEncoder {
   private writer = new BinaryWriter();
   private writtenRecords = new Set<number>();
+  private decoder?: NrbfDecoder;
 
-  encode(root: NrbfRecord, rootId?: number): ArrayBuffer {
+  encode(root: NrbfRecord, decoder?: NrbfDecoder, rootId?: number): ArrayBuffer {
     const actualRootId = rootId ?? root.objectId ?? 1;
     
-    // Write header
+    this.decoder = decoder;
+    this.writer = new BinaryWriter();
+    this.writtenRecords.clear();
+    
     this.writer.writeByte(RecordType.SerializedStreamHeader);
     this.writer.writeInt32(actualRootId);
     this.writer.writeInt32(-1);
     this.writer.writeInt32(1);
     this.writer.writeInt32(0);
     
-    // Write root record
-    this.encodeRecord(root);
+    // First pass: collect all records in the graph
+    const allRecords = this.collectAllRecords(root);
     
-    // Write MessageEnd
+    // Second pass: encode them in order
+    for (const record of allRecords) {
+      if (!this.writtenRecords.has(record.objectId!)) {
+        this.encodeRecord(record);
+      }
+    }
+    
     this.writer.writeByte(RecordType.MessageEnd);
     
     return this.writer.toBuffer();
+  }
+
+  private collectAllRecords(root: NrbfRecord): NrbfRecord[] {
+    const collected: NrbfRecord[] = [];
+    const seen = new Set<number>();
+
+    const collect = (record: any) => {
+      if (!record) return;
+      
+      // Skip primitives
+      if (typeof record !== 'object') return;
+      
+      // Handle NrbfRecord
+      if (record instanceof NrbfRecord) {
+        if (record.objectId && seen.has(record.objectId)) return;
+        if (record.objectId) seen.add(record.objectId);
+        
+        // Skip MemberReference - we need to resolve and collect the target
+        if (record instanceof MemberReferenceRecord) {
+          if (this.decoder) {
+            const target = this.decoder.getRecord(record.idRef);
+            if (target) {
+              collect(target);
+            }
+          }
+          return;
+        }
+        
+        collected.push(record);
+        
+        // Recurse into class members
+        if (record instanceof ClassRecord) {
+          for (const memberName of record.memberNames) {
+            collect(record.getValue(memberName));
+          }
+        }
+        
+        // Recurse into arrays
+        if (record instanceof BinaryArrayRecord ||
+            record instanceof ArraySinglePrimitiveRecord ||
+            record instanceof ArraySingleObjectRecord ||
+            record instanceof ArraySingleStringRecord) {
+          for (const element of record.getArray()) {
+            collect(element);
+          }
+        }
+      }
+    };
+
+    collect(root);
+    return collected;
   }
 
   private encodeRecord(record: NrbfRecord): void {
@@ -1372,8 +1449,6 @@ export class NrbfEncoder {
       this.encodeBinaryLibrary(record);
     } else if (record instanceof MemberPrimitiveTypedRecord) {
       this.encodeMemberPrimitiveTyped(record);
-    } else if (record instanceof MemberReferenceRecord) {
-      this.encodeMemberReference(record);
     } else if (record instanceof ObjectNullRecord) {
       this.writer.writeByte(RecordType.ObjectNull);
     } else if (record instanceof ObjectNullMultipleRecord) {
@@ -1390,6 +1465,31 @@ export class NrbfEncoder {
   private encodeClassRecord(record: ClassRecord): void {
     const rt = record.recordType;
     
+    // Special handling for ClassWithId - just use the stored metadataId
+    if (rt === RecordType.ClassWithId && record.metadataId !== undefined) {
+      this.writer.writeByte(RecordType.ClassWithId);
+      this.writer.writeInt32(record.classInfo.objectId);
+      this.writer.writeInt32(record.metadataId);
+      
+      // Write member values
+      for (let i = 0; i < record.classInfo.memberNames.length; i++) {
+        const memberName = record.classInfo.memberNames[i];
+        const value = record.memberValues.get(memberName);
+        
+        let binaryType: BinaryType | undefined;
+        let additionalInfo: AdditionalTypeInfo | undefined;
+        
+        if (record.memberTypeInfo) {
+          binaryType = record.memberTypeInfo.binaryTypeEnums[i];
+          additionalInfo = record.memberTypeInfo.additionalInfos[i];
+        }
+        
+        this.writeObjectValue(value, binaryType, additionalInfo);
+      }
+      return;
+    }
+    
+    // For other class record types, write full definition
     this.writer.writeByte(rt);
     this.writeClassInfo(record.classInfo);
     
@@ -1401,9 +1501,20 @@ export class NrbfEncoder {
       this.writer.writeInt32(record.libraryId!);
     }
     
-    for (const memberName of record.classInfo.memberNames) {
+    // Write member values
+    for (let i = 0; i < record.classInfo.memberNames.length; i++) {
+      const memberName = record.classInfo.memberNames[i];
       const value = record.memberValues.get(memberName);
-      this.writeObjectValue(value);
+      
+      let binaryType: BinaryType | undefined;
+      let additionalInfo: AdditionalTypeInfo | undefined;
+      
+      if (record.memberTypeInfo) {
+        binaryType = record.memberTypeInfo.binaryTypeEnums[i];
+        additionalInfo = record.memberTypeInfo.additionalInfos[i];
+      }
+      
+      this.writeObjectValue(value, binaryType, additionalInfo);
     }
   }
 
@@ -1454,7 +1565,7 @@ export class NrbfEncoder {
     this.writeAdditionalTypeInfo(record.additionalTypeInfo);
     
     for (const element of record.elementValues) {
-      this.writeObjectValue(element);
+      this.writeObjectValue(element, record.typeEnum, record.additionalTypeInfo);
     }
   }
 
@@ -1533,23 +1644,40 @@ export class NrbfEncoder {
     this.writer.writeByte(record.nullCount);
   }
 
-  private writeObjectValue(value: ObjectValue | undefined): void {
+  private writeObjectValue(
+    value: ObjectValue | undefined, 
+    binaryType?: BinaryType, 
+    additionalInfo?: AdditionalTypeInfo
+  ): void {
     if (value === null || value === undefined) {
       this.writer.writeByte(RecordType.ObjectNull);
-    } else if (value instanceof NrbfRecord) {
+      return;
+    }
+    
+    if (binaryType === BinaryType.Primitive && additionalInfo?.type === 'Primitive') {
+      this.writePrimitiveValue(value as PrimitiveValue, additionalInfo.primitiveType);
+      return;
+    }
+    
+    // For MemberReference, ONLY write the reference - don't encode the target!
+    if (value instanceof MemberReferenceRecord) {
+      this.encodeMemberReference(value);
+      return;
+    }
+    
+    if (value instanceof NrbfRecord) {
       this.encodeRecord(value);
+      return;
+    }
+    
+    if (typeof value === 'boolean') {
+      this.writer.writeBoolean(value);
+    } else if (typeof value === 'number') {
+      this.writer.writeInt32(value);
+    } else if (typeof value === 'string') {
+      throw new Error('Cannot encode bare string without object ID - internal error');
     } else {
-      // Direct primitive value - write it inline (used in arrays)
-      // Determine type and write
-      if (typeof value === 'boolean') {
-        this.writer.writeBoolean(value);
-      } else if (typeof value === 'number') {
-        // Ambiguous - caller should use proper typed arrays
-        throw new Error('Cannot encode bare number - use typed array records');
-      } else if (typeof value === 'string') {
-        // In array context, strings should be BinaryObjectString
-        throw new Error('Cannot encode bare string - wrap in BinaryObjectStringRecord');
-      }
+      throw new Error(`Cannot encode value of type ${typeof value} without type information`);
     }
   }
 
@@ -1562,63 +1690,48 @@ export class NrbfEncoder {
       case PrimitiveType.Boolean:
         this.writer.writeBoolean(value as boolean);
         break;
-      
       case PrimitiveType.Byte:
         this.writer.writeByte(value as number);
         break;
-      
       case PrimitiveType.SByte:
         this.writer.writeSByte(value as number);
         break;
-      
       case PrimitiveType.Char:
         this.writer.writeChar(value as string);
         break;
-      
       case PrimitiveType.Int16:
         this.writer.writeInt16(value as number);
         break;
-      
       case PrimitiveType.UInt16:
         this.writer.writeUInt16(value as number);
         break;
-      
       case PrimitiveType.Int32:
         this.writer.writeInt32(value as number);
         break;
-      
       case PrimitiveType.UInt32:
         this.writer.writeUInt32(value as number);
         break;
-      
       case PrimitiveType.Int64:
         this.writer.writeInt64(BigInt(value as number));
         break;
-      
       case PrimitiveType.UInt64:
         this.writer.writeUInt64(BigInt(value as number));
         break;
-      
       case PrimitiveType.Single:
         this.writer.writeSingle(value as number);
         break;
-      
       case PrimitiveType.Double:
         this.writer.writeDouble(value as number);
         break;
-      
       case PrimitiveType.Decimal:
         this.writer.writeDecimal(value as string);
         break;
-      
       case PrimitiveType.DateTime:
         this.writer.writeDateTime(BigInt(value as number));
         break;
-      
       case PrimitiveType.TimeSpan:
         this.writer.writeTimeSpan(BigInt(value as number));
         break;
-      
       case PrimitiveType.String:
         this.writer.writeLengthPrefixedString(value as string);
         break;

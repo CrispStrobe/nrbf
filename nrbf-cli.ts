@@ -192,54 +192,6 @@ class NrbfCli {
     return `[${record.constructor.name}]`;
   }
 
-  async patch(): Promise<void> {
-    if (!this.options.patchFile) {
-      this.error('--patch-file is required');
-    }
-
-    const buffer = this.readInputFile();
-    const decoder = new NrbfDecoder(buffer, this.options.verbose || false);
-    const root = decoder.decode();
-
-    const patchContent = fs.readFileSync(this.options.patchFile, 'utf8');
-    const patches = JSON.parse(patchContent);
-
-    this.log('=== APPLYING PATCHES ===\n');
-
-    let modified = false;
-    if (Array.isArray(patches)) {
-      for (const patch of patches) {
-        if (this.applyPatch(root, patch)) {
-          modified = true;
-        }
-      }
-    } else {
-      if (this.applyPatch(root, patches)) {
-        modified = true;
-      }
-    }
-
-    if (!modified) {
-      this.warn('No changes were made');
-      return;
-    }
-
-    if (this.options.backup && this.options.input) {
-      this.backupFile(this.options.input);
-    }
-
-    const encoder = new NrbfEncoder();
-    const newBuffer = encoder.encode(root);
-    
-    const outputPath = this.options.output || this.options.input;
-    if (!outputPath) {
-      this.error('No output file specified');
-    }
-
-    fs.writeFileSync(outputPath, Buffer.from(newBuffer));
-    this.success(`Patched file saved to ${outputPath}`);
-  }
-
   async binaryPatch(): Promise<void> {
     if (!this.options.guid || !this.options.newGuid) {
       this.error('--guid and --new-guid are required');
@@ -328,7 +280,6 @@ class NrbfCli {
     if (parentPath) {
       parent = NrbfUtils.getNestedValue(root, parentPath, this.decoder);
       
-      // Resolve if it's a reference
       if (parent instanceof MemberReferenceRecord) {
         parent = this.decoder.getRecord(parent.idRef);
       }
@@ -349,7 +300,7 @@ class NrbfCli {
     }
 
     const encoder = new NrbfEncoder();
-    const newBuffer = encoder.encode(root);
+    const newBuffer = encoder.encode(root, this.decoder); // Pass decoder!
     
     const outputPath = this.options.output || this.options.input;
     if (!outputPath) {
@@ -358,6 +309,54 @@ class NrbfCli {
 
     fs.writeFileSync(outputPath, Buffer.from(newBuffer));
     this.success(`Updated file saved to ${outputPath}`);
+  }
+
+  async patch(): Promise<void> {
+    if (!this.options.patchFile) {
+      this.error('--patch-file is required');
+    }
+
+    const buffer = this.readInputFile();
+    this.decoder = new NrbfDecoder(buffer, this.options.verbose || false);
+    const root = this.decoder.decode();
+
+    const patchContent = fs.readFileSync(this.options.patchFile, 'utf8');
+    const patches = JSON.parse(patchContent);
+
+    this.log('=== APPLYING PATCHES ===\n');
+
+    let modified = false;
+    if (Array.isArray(patches)) {
+      for (const patch of patches) {
+        if (this.applyPatch(root, patch)) {
+          modified = true;
+        }
+      }
+    } else {
+      if (this.applyPatch(root, patches)) {
+        modified = true;
+      }
+    }
+
+    if (!modified) {
+      this.warn('No changes were made');
+      return;
+    }
+
+    if (this.options.backup && this.options.input) {
+      this.backupFile(this.options.input);
+    }
+
+    const encoder = new NrbfEncoder();
+    const newBuffer = encoder.encode(root, this.decoder); // Pass decoder!
+    
+    const outputPath = this.options.output || this.options.input;
+    if (!outputPath) {
+      this.error('No output file specified');
+    }
+
+    fs.writeFileSync(outputPath, Buffer.from(newBuffer));
+    this.success(`Patched file saved to ${outputPath}`);
   }
 
   async parse(): Promise<void> {
