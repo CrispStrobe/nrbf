@@ -773,43 +773,196 @@ class NrbfCli {
 
 function printHelp(): void {
   console.log(`
-NRBF CLI - Universal NRBF File Tool
-====================================
+${colorize('NRBF CLI - Universal NRBF File Tool', 'cyan')}
+${'='.repeat(50)}
 
-USAGE:
+${colorize('USAGE:', 'yellow')}
   nrbf <command> [options]
 
-COMMANDS:
+${colorize('NOTE:', 'yellow')}
+  If 'nrbf' command is not available, use:
+    ${colorize('node dist/nrbf-cli.js', 'magenta')} <command> [options]
+  
+  Or install globally:
+    ${colorize('npm link', 'magenta')}
+  
+  Or create an alias:
+    ${colorize('alias nrbf="node $(pwd)/dist/nrbf-cli.js"', 'magenta')}
+
+${colorize('COMMANDS:', 'yellow')}
   parse              Parse and display NRBF file structure
   export             Export NRBF to JSON
   patch              Apply JSON patch file (like .reg files)
   binary-patch       Binary GUID replacement
   get                Get value at path
   set                Set value at path
-  interactive        Interactive mode
+  hexdump            Display hex dump of file
+  interactive        Interactive REPL mode
   help               Show this help
 
-OPTIONS:
+${colorize('OPTIONS:', 'yellow')}
   -i, --input <file>       Input NRBF file (required)
-  -o, --output <file>      Output file
+  -o, --output <file>      Output file (default: overwrite input)
   -p, --path <path>        Path to field (dot notation)
   -v, --value <value>      Value to set
   -f, --format <format>    Output format: json, pretty, compact (default: pretty)
   --patch-file <file>      JSON patch file
   --guid <guid>            Source GUID for replacement
   --new-guid <guid>        Target GUID for replacement
-  --offset <offset>        Byte offset (for binary-patch with multiple matches)
+  --offset <offset>        Byte offset in hex (for binary-patch with multiple matches)
   --no-backup              Don't create backup files
-  --verbose                Verbose output
+  --verbose                Show detailed parsing information
   --max-depth <n>          Max depth for display (default: 10)
   --max-items <n>          Max items per array (default: 100)
 
-EXAMPLES:
-  nrbf parse -i save.sav
-  nrbf export -i save.sav -o save.json
-  nrbf patch -i save.sav --patch-file changes.json
-  nrbf binary-patch -i save.sav --guid "037b..." --new-guid "522..."
+${colorize('EXAMPLES:', 'yellow')}
+
+  ${colorize('# Parse and display file structure', 'green')}
+  nrbf parse -i PlayerData.sav
+
+  ${colorize('# Parse with verbose debugging', 'green')}
+  nrbf parse -i PlayerData.sav --verbose
+
+  ${colorize('# Display specific path only', 'green')}
+  nrbf parse -i PlayerData.sav -p "<VehiclesData>k__BackingField"
+
+  ${colorize('# Limit depth and items shown', 'green')}
+  nrbf parse -i PlayerData.sav --max-depth 3 --max-items 10
+
+  ${colorize('# Export to JSON', 'green')}
+  nrbf export -i PlayerData.sav -o save.json
+
+  ${colorize('# Export in compact format', 'green')}
+  nrbf export -i PlayerData.sav -o save.json -f compact
+
+  ${colorize('# Get a specific value', 'green')}
+  nrbf get -i PlayerData.sav -p "<MiscData>k__BackingField.money"
+
+  ${colorize('# Set a value (creates .bak backup)', 'green')}
+  nrbf set -i PlayerData.sav -p "<MiscData>k__BackingField.money" -v 99999
+
+  ${colorize('# Set value to different output file', 'green')}
+  nrbf set -i PlayerData.sav -o Modified.sav -p "<MiscData>k__BackingField.money" -v 99999
+
+  ${colorize('# Set value without backup', 'green')}
+  nrbf set -i PlayerData.sav -p "<MiscData>k__BackingField.money" -v 99999 --no-backup
+
+  ${colorize('# Binary GUID patch (single match)', 'green')}
+  nrbf binary-patch -i PlayerData.sav \\
+    --guid "037b1f7c-871e-4c44-8c0f-451bb24805ac" \\
+    --new-guid "522911f7-18ab-40c2-a749-1332e9aa7b96"
+
+  ${colorize('# Binary GUID patch (multiple matches, specify offset)', 'green')}
+  nrbf binary-patch -i PlayerData.sav \\
+    --guid "037b1f7c-871e-4c44-8c0f-451bb24805ac" \\
+    --new-guid "522911f7-18ab-40c2-a749-1332e9aa7b96" \\
+    --offset 0x1A3F
+
+  ${colorize('# Apply JSON patch file', 'green')}
+  nrbf patch -i PlayerData.sav --patch-file changes.json
+
+  ${colorize('# Apply patch to new file', 'green')}
+  nrbf patch -i PlayerData.sav -o Modified.sav --patch-file changes.json
+
+  ${colorize('# Hex dump (first 32 lines)', 'green')}
+  nrbf hexdump -i PlayerData.sav --max-items 32
+
+  ${colorize('# Interactive mode', 'green')}
+  nrbf interactive -i PlayerData.sav
+
+${colorize('JSON PATCH FORMAT:', 'yellow')}
+
+  ${colorize('Single operation:', 'cyan')}
+  {
+    "path": "<MiscData>k__BackingField.money",
+    "op": "set",
+    "value": 99999
+  }
+
+  ${colorize('Multiple operations:', 'cyan')}
+  [
+    {
+      "path": "<MiscData>k__BackingField.money",
+      "op": "set",
+      "value": 99999
+    },
+    {
+      "path": "<MiscData>k__BackingField.stat_candycanes",
+      "op": "set",
+      "value": 100
+    }
+  ]
+
+  ${colorize('Merge operation:', 'cyan')}
+  {
+    "path": "<CurrentClothes>k__BackingField",
+    "op": "merge",
+    "value": {
+      "<ClothingHat>k__BackingField": {
+        "clothingPrefabGUID": "e38ba795-8855-4c16-8acc-48d29b6c431b"
+      }
+    }
+  }
+
+${colorize('INTERACTIVE COMMANDS:', 'yellow')}
+  ls [path]              List contents at path
+  get <path>             Get value at path
+  set <path> <value>     Set value at path
+  patch <file>           Apply JSON patch file
+  save                   Save changes to file
+  exit                   Exit interactive mode
+
+  ${colorize('Example session:', 'cyan')}
+  nrbf> ls <MiscData>k__BackingField
+  nrbf> get <MiscData>k__BackingField.money
+  nrbf> set <MiscData>k__BackingField.money 99999
+  nrbf> save
+  nrbf> exit
+
+${colorize('PATH NOTATION:', 'yellow')}
+  Use dot notation to navigate nested structures:
+  • Fields: "<MiscData>k__BackingField.money"
+  • Arrays: "Vehicles._items.0.VehicleID"
+  • Nested: "<CurrentClothes>k__BackingField.<ClothingHat>k__BackingField"
+  • Lists: "Vehicles._items" (array of items)
+
+${colorize('TIPS:', 'yellow')}
+  • All edit commands create .bak backups by default (use --no-backup to disable)
+  • Use --verbose to debug parsing issues and see detailed record information
+  • GUID format: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx (case insensitive)
+  • Offset values are in hexadecimal (prefix with 0x, e.g., 0x1A3F)
+  • Interactive mode keeps file in memory for fast multiple operations
+  • JSON export preserves all type information with $type and $id fields
+  • Path navigation automatically resolves MemberReference records
+
+${colorize('COMMON UNITY PATTERNS:', 'yellow')}
+  • Backing fields: <FieldName>k__BackingField
+  • Lists: _items (array), _size (count), _version (modification count)
+  • GUIDs: System.Guid with 11 fields (_a through _k)
+  • Colors: SerializableColor with r, g, b, a fields (floats 0-1)
+
+${colorize('MORE INFO:', 'yellow')}
+  Repository: ${colorize('https://github.com/CrispStrobe/nrbf', 'blue')}
+  License: AGPL-3.0
+  Issues: ${colorize('https://github.com/CrispStrobe/nrbf/issues', 'blue')}
+  
+  For detailed documentation, see README.md
 `);
+}
+
+// Helper function for colored output in help
+function colorize(text: string, color: string): string {
+  const colors: Record<string, string> = {
+    reset: '\x1b[0m',
+    red: '\x1b[31m',
+    green: '\x1b[32m',
+    yellow: '\x1b[33m',
+    blue: '\x1b[34m',
+    magenta: '\x1b[35m',
+    cyan: '\x1b[36m',
+  };
+
+  return `${colors[color] || ''}${text}${colors.reset}`;
 }
 
 async function main(): Promise<void> {
