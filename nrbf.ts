@@ -1,5 +1,4 @@
-// nrbf.ts - Complete NRBF Parser/Encoder for Unity .sav files
-// Feature-complete with Rust library and C# decoder
+// nrbf.ts - NRBF Parser/Encoder for Unity .sav files
 
 /**
  * NRBF Record Types
@@ -161,7 +160,6 @@ type PrimitiveValue =
 
 /**
  * Object Values (can be primitive or nested record)
- * Matches Rust: enum ObjectValue { Primitive(PrimitiveValue), Record(Box<Record>) }
  */
 type ObjectValue = PrimitiveValue | NrbfRecord;
 
@@ -271,7 +269,7 @@ class ClassRecord extends NrbfRecord {
 }
 
 /**
- * Binary Array Record - COMPLETE with all fields from Rust
+ * Binary Array Record
  */
 class BinaryArrayRecord extends NrbfRecord {
   constructor(
@@ -698,7 +696,7 @@ class BinaryWriter {
 }
 
 /**
- * NRBF Decoder - COMPLETE implementation matching Rust
+ * NRBF Decoder
  */
 export class NrbfDecoder {
   private reader: BinaryReader;
@@ -1328,7 +1326,7 @@ export class NrbfDecoder {
 }
 
 /**
- * NRBF Encoder - COMPLETE implementation matching Rust
+ * NRBF Encoder
  */
 export class NrbfEncoder {
   private writer = new BinaryWriter();
