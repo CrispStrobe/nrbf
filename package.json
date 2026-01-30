@@ -1,0 +1,23 @@
+{
+  "name": "nrbf-cli",
+  "version": "1.0.0",
+  "description": "Universal NRBF file parser, editor, and patcher, e.g. for Unity .sav files",
+  "main": "dist/nrbf.js",
+  "bin": {
+    "nrbf": "dist/nrbf-cli.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/nrbf-cli.js",
+    "dev": "ts-node nrbf-cli.ts"
+  },
+  "keywords": ["nrbf", "unity", "save", "parser", "editor"],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {},
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.0.0",
+    "ts-node": "^10.0.0"
+  }
+}
